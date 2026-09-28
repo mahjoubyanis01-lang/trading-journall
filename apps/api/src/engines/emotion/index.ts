@@ -15,7 +15,7 @@ const LEXICON: { state: EmotionalState; weight: number; re: RegExp }[] = [
   { state: "positive", weight: 0.5, re: W("trop bien|génial|super|content|contente|heureux|heureuse|hâte|excellent|parfait|mdr+|lol|ptdr|haha+|jsuis chaud|kiff") },
   { state: "positive", weight: 0.3, re: /[😂🤣😍❤️🥰😁😊🎉🔥]/u },
   { state: "tired", weight: 0.6, re: W("crevé|crevée|épuisé|épuisée|fatigué|fatiguée|pas dormi|insomnie|mort de fatigue|plus d'énergie|k\\.?o\\.?") },
-  { state: "stressed", weight: 0.6, re: W("stress|stressé|stressée|angoiss\\p{L}*|anxieu\\p{L}*|paniqu\\p{L}*|pression|deadline|j'?y arrive pas|trop de trucs|débordé|débordée") },
+  { state: "stressed", weight: 0.6, re: W("stress\\p{L}*|angoiss\\p{L}*|anxieu\\p{L}*|paniqu\\p{L}*|pression|deadline|j'?y arrive pas|trop de trucs|débordé|débordée") },
   { state: "sad", weight: 0.7, re: W("triste|déprim\\p{L}*|seul|seule|pleur\\p{L}*|nul|nulle|à quoi bon|j'en peux plus|vide|abandonn\\p{L}*|personne ne") },
   { state: "sad", weight: 0.4, re: /[😢😭💔🙁😞]/u },
   { state: "angry", weight: 0.6, re: W("énervé|énervée|furax|vénère|rage|ça me saoule|marre|putain|fait chier|insupportable") },

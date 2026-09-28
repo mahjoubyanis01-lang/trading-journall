@@ -57,7 +57,7 @@ describe("conversations", () => {
     expect(list[0].unreadCount).toBe(3);
     expect(list[0].lastMessagePreview).toBe("raconte");
 
-    const last = ctx.ai.requests[ctx.ai.requests.length - 1]!;
+    const last = ctx.ai.requests.filter((r) => r.task.startsWith("chat")).at(-1)!;
     expect(last.task).toBe("chat.simple");
     expect(last.messages[last.messages.length - 1]).toEqual({ role: "user", content: "journée bizarre" });
 
@@ -76,14 +76,15 @@ describe("conversations", () => {
     ctx.ai.enqueue("hey");
     const conv = (await ctx.app.inject({ method: "GET", url: `/api/companions/${companion.id}/conversation`, headers: auth })).json().conversation;
     await ctx.app.services.conversations.bus.waitFor(conv.id, (e) => e.type === "message");
-    const before = ctx.ai.requests.length;
+    const chatCount = () => ctx.ai.requests.filter((r) => r.task.startsWith("chat")).length;
+    const before = chatCount();
     ctx.ai.enqueue("les deux d'un coup");
     const [a, b] = await Promise.all([
       ctx.app.services.conversations.sendUserMessage((await ctx.app.services.auth.resolve(auth.authorization.slice(7)))!.id, conv.id, { content: "un", kind: "text" }),
       ctx.app.services.conversations.sendUserMessage((await ctx.app.services.auth.resolve(auth.authorization.slice(7)))!.id, conv.id, { content: "deux", kind: "text" }),
     ]);
     await Promise.all([a.reply, b.reply]);
-    expect(ctx.ai.requests.length - before).toBe(1);
+    expect(chatCount() - before).toBe(1);
     const msgs = (await ctx.app.inject({ method: "GET", url: `/api/conversations/${conv.id}/messages`, headers: auth })).json().messages;
     expect(msgs.map((m: { content: string }) => m.content)).toEqual(["hey", "un", "deux", "les deux d'un coup"]);
   });
@@ -145,5 +146,46 @@ describe("conversations", () => {
     const conv = (await ctx.app.inject({ method: "GET", url: `/api/companions/${companion.id}/conversation`, headers: auth })).json().conversation;
     expect((await ctx.app.inject({ method: "POST", url: `/api/conversations/${conv.id}/messages`, headers: auth, payload: { content: "   " } })).statusCode).toBe(400);
     expect((await ctx.app.inject({ method: "POST", url: `/api/conversations/${conv.id}/messages`, headers: auth, payload: { content: "x".repeat(4001) } })).statusCode).toBe(400);
+  });
+});
+
+describe("conversations × cerveau × humeur", () => {
+  it("après une réponse, la mémoire est extraite, l'humeur lue et la calibration mise à jour ; le tour suivant voit le cerveau", async () => {
+    const { auth, companion, userId } = await setup();
+    ctx.ai.enqueue("hey");
+    const conv = (await ctx.app.inject({ method: "GET", url: `/api/companions/${companion.id}/conversation`, headers: auth })).json().conversation;
+    await ctx.app.services.conversations.bus.waitFor(conv.id, (e) => e.type === "message");
+
+    // Tour 1 : humeur (LLM) puis extraction mémoire, dans l'ordre d'appel des tâches structurées.
+    ctx.ai.enqueueStructured({ dominant: "stressed", confidence: 0.8, cues: ["entretien"] });
+    ctx.ai.enqueueStructured({ items: [{ type: "identity", key: "travail", content: "Yan cherche un poste de dev", importance: 0.8, confidence: 0.95 }], events: [{ type: "interview", title: "Entretien dev", date: "vendredi", importance: 0.9 }] });
+    ctx.ai.enqueue("ah un entretien, stressé ?");
+    await ctx.app.inject({ method: "POST", url: `/api/conversations/${conv.id}/messages`, headers: auth, payload: { content: "vendredi j'ai un entretien pour un poste de dev, je stresse un peu" } });
+    await ctx.app.services.conversations.bus.waitFor(conv.id, (e) => e.type === "message" && e.message.sender === "companion");
+    await ctx.app.services.conversations.idle();
+
+    const brain = (await ctx.app.inject({ method: "GET", url: `/api/companions/${companion.id}/brain`, headers: auth })).json();
+    expect(brain.memories.map((m: { key: string }) => m.key)).toContain("travail");
+    expect(brain.events).toHaveLength(1);
+    expect(brain.events[0].title).toBe("Entretien dev");
+    expect(brain.calibration.readings).toBe(1);
+    expect(brain.calibration.current.stressed).toBeGreaterThan(0.3);
+    const readings = await ctx.app.services.mood.recentReadings(companion.id);
+    expect(readings[0]?.source).toBe("llm");
+    expect(readings[0]?.dominant).toBe("stressed");
+    expect(readings[0]?.userId).toBe(userId);
+
+    // Tour 2 : le prompt contient le cerveau (partie stable) et la calibration (partie volatile).
+    ctx.ai.enqueue("tu vas gérer");
+    await ctx.app.inject({ method: "POST", url: `/api/conversations/${conv.id}/messages`, headers: auth, payload: { content: "tu crois que ça va aller ?" } });
+    await ctx.app.services.conversations.bus.waitFor(conv.id, (e) => e.type === "message" && e.message.content === "tu vas gérer");
+    await ctx.app.services.conversations.idle();
+    const chatReq = ctx.ai.requests.filter((r) => r.task.startsWith("chat")).at(-1)!;
+    expect(chatReq.system).toContain("## Ta mémoire de Yan");
+    expect(chatReq.system).toContain("Entretien dev");
+    expect(chatReq.system).toContain("cherche un poste de dev");
+    expect(chatReq.task).toBe("chat.deep"); // événement à venir → modèle profond
+    expect(chatReq.systemVolatile).toContain("Calibration du moment");
+    expect(chatReq.systemVolatile).toContain("stressée");
   });
 });

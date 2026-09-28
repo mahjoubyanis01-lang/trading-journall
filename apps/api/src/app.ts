@@ -19,12 +19,18 @@ import { ConversationService } from "./modules/conversations/service.js";
 import { conversationRoutes } from "./modules/conversations/routes.js";
 import { ConversationBus } from "./modules/conversations/bus.js";
 import { ConversationEngine } from "./engines/conversation/index.js";
+import { MemoryEngine } from "./engines/memory/index.js";
+import { MoodService } from "./modules/mood/service.js";
+import { brainRoutes } from "./modules/brain/routes.js";
+import type { Logger } from "./observability/logger.js";
 
 export interface Services {
   auth: AuthService;
   users: UserService;
   companions: CompanionService;
   conversations: ConversationService;
+  memory: MemoryEngine;
+  mood: MoodService;
   costs: CostMeter;
 }
 
@@ -56,14 +62,26 @@ export async function buildApp({ config, db, ai }: BuildAppOptions): Promise<Fas
   app.decorate("ai", ai);
   const companions = new CompanionService(db);
   const costs = new CostMeter(db);
+  const log = app.log as unknown as Logger;
+  const memory = new MemoryEngine(db, ai);
+  const mood = new MoodService(db, ai, log);
   app.decorate("services", {
     auth: new AuthService(db, config.SESSION_TTL_DAYS),
     users: new UserService(db),
     companions,
-    conversations: new ConversationService(db, new ConversationEngine(ai), companions, costs, new ConversationBus(), app.log as unknown as import("./observability/logger.js").Logger, {
-      pacing: config.NODE_ENV === "test" ? 0 : 1,
-      settleMs: config.NODE_ENV === "test" ? 100 : 700,
-    }),
+    conversations: new ConversationService(
+      db,
+      new ConversationEngine(ai),
+      companions,
+      costs,
+      new ConversationBus(),
+      log,
+      { pacing: config.NODE_ENV === "test" ? 0 : 1, settleMs: config.NODE_ENV === "test" ? 100 : 700 },
+      memory,
+      mood,
+    ),
+    memory,
+    mood,
     costs,
   } satisfies Services);
 
@@ -83,7 +101,7 @@ export async function buildApp({ config, db, ai }: BuildAppOptions): Promise<Fas
     });
   });
 
-  app.get("/health", async () => ({ ok: true, ai: ai.name }));
+  app.get("/health", async () => ({ ok: true, ai: ai.name, slots: config.aiSlots }));
 
   await app.register(
     async (api) => {
@@ -91,6 +109,7 @@ export async function buildApp({ config, db, ai }: BuildAppOptions): Promise<Fas
       await api.register(userRoutes);
       await api.register(companionRoutes);
       await api.register(conversationRoutes);
+      await api.register(brainRoutes);
     },
     { prefix: "/api" },
   );

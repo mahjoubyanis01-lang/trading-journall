@@ -42,6 +42,7 @@ export class FakeAIProvider implements AIProvider {
     return {
       text,
       model: "fake",
+      provider: "fake",
       stopReason: "end_turn",
       usage: { inputTokens: Math.ceil((req.system.length + req.messages.reduce((n, m) => n + m.content.length, 0)) / 4), outputTokens: Math.ceil(text.length / 4), cacheReadTokens: 0, cacheWriteTokens: 0 },
       latencyMs: 1,
@@ -64,8 +65,15 @@ export class FakeAIProvider implements AIProvider {
   async structured<T>(req: CompletionRequest, schema: ZodType<T>, schemaName: string): Promise<StructuredResult<T>> {
     this.requests.push(req);
     const raw = this.structuredQueue.shift();
-    if (raw === undefined) throw new Error(`FakeAIProvider: aucune réponse structurée en file pour ${schemaName}`);
-    const data = schema.parse(raw);
-    return { data, model: "fake", usage: { inputTokens: 10, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 }, latencyMs: 1 };
+    let data: T;
+    if (raw === undefined) {
+      // Sans script : la valeur "vide" du schéma (listes vides, défauts), sinon erreur explicite.
+      const r = schema.safeParse({});
+      if (!r.success) throw new Error(`FakeAIProvider: aucune réponse structurée en file pour ${schemaName}`);
+      data = r.data;
+    } else {
+      data = schema.parse(raw);
+    }
+    return { data, model: "fake", provider: "fake", usage: { inputTokens: 10, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 }, latencyMs: 1 };
   }
 }

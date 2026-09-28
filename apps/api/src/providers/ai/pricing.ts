@@ -6,8 +6,12 @@ export const PRICE_PER_MTOK: Record<string, { input: number; output: number; cac
   fake: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 };
 
-export function costMicroUsd(model: string, usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }) {
-  const p = PRICE_PER_MTOK[model] ?? PRICE_PER_MTOK["claude-sonnet-5"]!;
+/** Fournisseurs sans coût marginal par token (local, Hermes Agent auto-hébergé, factice). */
+export const FREE_PROVIDERS = new Set(["local", "hermes", "fake"]);
+
+export function costMicroUsd(model: string, usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }, provider?: string) {
+  if (provider && FREE_PROVIDERS.has(provider)) return 0;
+  const p = PRICE_PER_MTOK[model] ?? (provider === "anthropic" ? PRICE_PER_MTOK["claude-sonnet-5"]! : PRICE_PER_MTOK.fake!);
   const usd =
     (usage.inputTokens * p.input + usage.outputTokens * p.output + usage.cacheReadTokens * p.cacheRead + usage.cacheWriteTokens * p.cacheWrite) /
     1_000_000;

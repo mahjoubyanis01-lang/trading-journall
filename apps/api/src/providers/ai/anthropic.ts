@@ -54,7 +54,7 @@ export class AnthropicAIProvider implements AIProvider {
       .filter((b): b is Anthropic.TextBlock => b.type === "text")
       .map((b) => b.text)
       .join("");
-    return { text, model: res.model, stopReason: res.stop_reason ?? "end_turn", usage: this.toUsage(res.usage), latencyMs: Date.now() - started };
+    return { text, model: res.model, provider: this.name, stopReason: res.stop_reason ?? "end_turn", usage: this.toUsage(res.usage), latencyMs: Date.now() - started };
   }
 
   async *stream(req: CompletionRequest): AsyncIterable<CompletionEvent> {
@@ -73,7 +73,7 @@ export class AnthropicAIProvider implements AIProvider {
       .join("");
     yield {
       type: "done",
-      result: { text, model: final.model, stopReason: final.stop_reason ?? "end_turn", usage: this.toUsage(final.usage), latencyMs: Date.now() - started },
+      result: { text, model: final.model, provider: this.name, stopReason: final.stop_reason ?? "end_turn", usage: this.toUsage(final.usage), latencyMs: Date.now() - started },
     };
   }
 
@@ -87,6 +87,6 @@ export class AnthropicAIProvider implements AIProvider {
     if (res.parsed_output == null) {
       throw new Error(`Sortie structurée invalide (${schemaName}, stop_reason=${res.stop_reason})`);
     }
-    return { data: res.parsed_output, model: res.model, usage: this.toUsage(res.usage), latencyMs: Date.now() - started };
+    return { data: res.parsed_output, model: res.model, provider: this.name, usage: this.toUsage(res.usage), latencyMs: Date.now() - started };
   }
 }

@@ -22,12 +22,36 @@ const envSchema = z.object({
     .transform((v) => v === "true"),
   SESSION_TTL_DAYS: z.coerce.number().int().positive().default(30),
 
-  /** Fournisseur IA : "anthropic" (clé serveur requise) ou "fake" (tests / dev sans clé). */
-  AI_PROVIDER: z.enum(["anthropic", "fake"]).optional(),
+  /**
+   * Fournisseur IA par défaut : "local" (Ollama/llama.cpp, OpenAI-compatible), "hermes" (Hermes Agent API server),
+   * "anthropic" (clé serveur requise) ou "fake" (tests). Les slots chat/fast/deep peuvent le surcharger.
+   */
+  AI_PROVIDER: z.enum(["local", "hermes", "anthropic", "fake"]).optional(),
+  AI_CHAT_PROVIDER: z.enum(["local", "hermes", "anthropic", "fake"]).optional(),
+  AI_FAST_PROVIDER: z.enum(["local", "hermes", "anthropic", "fake"]).optional(),
+  AI_DEEP_PROVIDER: z.enum(["local", "hermes", "anthropic", "fake"]).optional(),
+  /** Charge les modèles locaux au démarrage pour des premières réponses rapides. */
+  AI_WARMUP: z
+    .string()
+    .optional()
+    .transform((v) => v === "true"),
   ANTHROPIC_API_KEY: z.string().optional(),
+
+  /** LLM local, texte uniquement (Ollama par défaut). */
+  LOCAL_LLM_BASE_URL: z.string().default("http://127.0.0.1:11434/v1"),
+  LOCAL_LLM_API_KEY: z.string().optional(),
+  LOCAL_CHAT_MODEL: z.string().default("hermes3:8b"),
+  LOCAL_FAST_MODEL: z.string().default("hermes3:3b"),
+  LOCAL_DEEP_MODEL: z.string().optional(),
+
+  /** Hermes Agent (Nous Research) : `hermes gateway` avec API_SERVER_ENABLED=true. */
+  HERMES_AGENT_BASE_URL: z.string().default("http://127.0.0.1:8642/v1"),
+  HERMES_AGENT_API_KEY: z.string().optional(),
+  HERMES_AGENT_MODEL: z.string().default("hermes-agent"),
 });
 
-export type AppConfig = z.infer<typeof envSchema> & { aiProvider: "anthropic" | "fake" };
+export type ProviderKind = "local" | "hermes" | "anthropic" | "fake";
+export type AppConfig = z.infer<typeof envSchema> & { aiProvider: ProviderKind; aiSlots: { chat: ProviderKind; fast: ProviderKind; deep: ProviderKind } };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = envSchema.safeParse(env);
@@ -36,10 +60,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error(`Configuration invalide: ${issues}`);
   }
   const c = parsed.data;
-  // Sans clé Anthropic, on bascule explicitement sur le provider factice et on le dit.
-  const aiProvider: "anthropic" | "fake" = c.AI_PROVIDER ?? (c.ANTHROPIC_API_KEY ? "anthropic" : "fake");
-  if (aiProvider === "anthropic" && !c.ANTHROPIC_API_KEY && c.NODE_ENV === "production") {
-    throw new Error("ANTHROPIC_API_KEY manquante en production.");
+  // Défaut : local (Ollama) sauf en test. Si une clé Anthropic existe et que rien n'est précisé, on la
+  // réserve au slot "deep" (conversations importantes) et le reste tourne en local.
+  const aiProvider: ProviderKind = c.AI_PROVIDER ?? (c.NODE_ENV === "test" ? "fake" : "local");
+  const aiSlots = {
+    chat: c.AI_CHAT_PROVIDER ?? aiProvider,
+    fast: c.AI_FAST_PROVIDER ?? (aiProvider === "hermes" ? "local" : aiProvider),
+    deep: c.AI_DEEP_PROVIDER ?? (!c.AI_PROVIDER && c.ANTHROPIC_API_KEY && aiProvider === "local" ? "anthropic" : aiProvider),
+  } as const;
+  for (const slot of Object.values(aiSlots)) {
+    if (slot === "anthropic" && !c.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY manquante alors qu'un slot IA utilise anthropic.");
   }
-  return { ...c, aiProvider };
+  return { ...c, aiProvider, aiSlots };
 }

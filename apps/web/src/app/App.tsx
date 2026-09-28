@@ -5,6 +5,7 @@ import { OnboardingFlow } from "../features/onboarding/OnboardingFlow";
 import { LoginScreen } from "../features/auth/LoginScreen";
 import { HomeScreen } from "../features/home/HomeScreen";
 import { CompanionProfile } from "../features/companion/CompanionProfile";
+import { BrainScreen } from "../features/companion/BrainScreen";
 import { ChatScreen } from "../features/chat/ChatScreen";
 import { SettingsScreen } from "../features/home/SettingsScreen";
 
@@ -34,6 +35,7 @@ export function App() {
       <Route path="/settings" element={<Guard><SettingsScreen /></Guard>} />
       <Route path="/c/:id" element={<Guard><ChatScreen /></Guard>} />
       <Route path="/c/:id/profile" element={<Guard><CompanionProfile /></Guard>} />
+      <Route path="/c/:id/brain" element={<Guard><BrainScreen /></Guard>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

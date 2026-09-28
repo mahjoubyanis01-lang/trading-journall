@@ -7,9 +7,9 @@ import type { Usage } from "../providers/ai/types.js";
 export class CostMeter {
   constructor(private db: Db) {}
 
-  async recordTokens(input: { userId: string; companionId?: string; model: string; feature: string; usage: Usage }) {
+  async recordTokens(input: { userId: string; companionId?: string; model: string; provider?: string; feature: string; usage: Usage }) {
     const { usage, model } = input;
-    const total = costMicroUsd(model, usage);
+    const total = costMicroUsd(model, usage, input.provider);
     const rows = [
       { kind: "tokens_in" as const, quantity: usage.inputTokens },
       { kind: "tokens_out" as const, quantity: usage.outputTokens },

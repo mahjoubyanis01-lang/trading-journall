@@ -53,6 +53,8 @@ export interface Usage {
 export interface CompletionResult {
   text: string;
   model: string;
+  /** Nom du fournisseur ayant servi la requête (comptabilité : les modèles locaux coûtent 0). */
+  provider: string;
   stopReason: string;
   usage: Usage;
   latencyMs: number;
@@ -65,6 +67,7 @@ export type CompletionEvent =
 export interface StructuredResult<T> {
   data: T;
   model: string;
+  provider: string;
   usage: Usage;
   latencyMs: number;
 }

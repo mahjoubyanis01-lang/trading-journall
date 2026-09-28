@@ -9,6 +9,10 @@ import type { CostMeter } from "../../costs/meter.js";
 import type { Logger } from "../../observability/logger.js";
 import { CompanionService } from "../companions/service.js";
 import { ConversationBus } from "./bus.js";
+import type { MemoryEngine } from "../../engines/memory/index.js";
+import type { MoodService } from "../mood/service.js";
+import { calibrate } from "../../engines/emotion/calibration.js";
+import { estimateEmotion } from "../../engines/emotion/index.js";
 
 export function toMessageDto(m: MessageRow): Message {
   return {
@@ -56,6 +60,9 @@ export class ConversationService {
   /** Par conversation : date du dernier message utilisateur déjà couvert par une génération. */
   private coveredUpTo = new Map<string, number>();
 
+  /** Jobs d'arrière-plan (humeur, mémoire) : suivis pour pouvoir attendre leur fin (tests, arrêt propre). */
+  private background = new Set<Promise<unknown>>();
+
   constructor(
     private db: Db,
     private engine: ConversationEngine,
@@ -64,7 +71,21 @@ export class ConversationService {
     public bus: ConversationBus,
     private log: Logger,
     private opts: ConversationServiceOptions,
+    private memory: MemoryEngine,
+    private mood: MoodService,
   ) {}
+
+  private track<T>(label: string, p: Promise<T>): void {
+    const wrapped = p.catch((err) => this.log.warn({ err, job: label }, "job d'arrière-plan échoué")).finally(() => this.background.delete(wrapped));
+    this.background.add(wrapped);
+  }
+
+  /** Attend la fin des générations et des jobs d'arrière-plan en cours. */
+  async idle(): Promise<void> {
+    for (let i = 0; i < 20 && (this.background.size > 0 || this.chains.size > 0); i++) {
+      await Promise.allSettled([...this.background, ...this.chains.values()]);
+    }
+  }
 
   async list(userId: string): Promise<Conversation[]> {
     const rows = await this.db
@@ -130,6 +151,17 @@ export class ConversationService {
       .where(eq(conversations.id, conversationId));
     const message = toMessageDto(row!);
     this.bus.publish(conversationId, { type: "message", message });
+    // Humeur : en parallèle de la réponse, jamais bloquant.
+    if (conv.companionId) {
+      this.track(
+        "mood.observe",
+        (async () => {
+          const { c } = await this.companions.getRaw(userId, conv.companionId!);
+          const user = (await this.db.query.users.findFirst({ where: (t, { eq }) => eq(t.id, userId) }))!;
+          await this.mood.observe(user, c, { id: row!.id, content: input.content });
+        })(),
+      );
+    }
     const reply = this.enqueue(conversationId, () => this.generate(userId, conversationId, { kind: "reply" }));
     return { message, reply };
   }
@@ -171,6 +203,12 @@ export class ConversationService {
 
     this.bus.publish(conversationId, { type: "typing", companionId: c.id });
     const started = Date.now();
+
+    // Cerveau (rappel ciblé sur les derniers messages utilisateur) + calibration du moment.
+    const recentUserText = history.filter((h) => h.sender === "user").slice(-3).map((h) => h.content).join(" ");
+    const [brain, cal] = await Promise.all([this.memory.brainForPrompt(c.id, recentUserText, user.timezone), this.mood.getCalibration(c.id)]);
+    const calibration = calibrate(cal, { traits: p.traits, style: p.style, preset: p.preset }, { heuristicNow: lastUser ? estimateEmotion(lastUser.content) : null });
+
     const out = await this.engine.generate({
       user,
       companion: c,
@@ -178,7 +216,10 @@ export class ConversationService {
       relationship: r,
       history: history.map((h) => ({ sender: h.sender, content: h.content })),
       mode,
+      brain: brain.text,
+      calibrationLines: calibration.lines,
     });
+    if (brain.recalledIds.length) this.track("memory.touch", this.memory.touchRecalled(brain.recalledIds));
 
     // Relation et coûts sont persistés AVANT la publication des bulles : quand le client voit
     // le message, l'état serveur est cohérent.
@@ -190,7 +231,7 @@ export class ConversationService {
         .where(eq(relationships.id, r.id));
       if (first) await tx.insert(relationshipEvents).values({ companionId: c.id, type: "first_conversation", payload: { mode: mode.kind } });
     });
-    await this.costs.recordTokens({ userId, companionId: c.id, model: out.result.model, feature: mode.kind === "reply" ? "chat.reply" : "chat.initiative", usage: out.result.usage });
+    await this.costs.recordTokens({ userId, companionId: c.id, model: out.result.model, provider: out.result.provider, feature: mode.kind === "reply" ? "chat.reply" : "chat.initiative", usage: out.result.usage });
 
     const created: MessageRow[] = [];
     for (let i = 0; i < out.bubbles.length; i++) {
@@ -230,9 +271,24 @@ export class ConversationService {
     }
 
     this.log.info(
-      { conversationId, companionId: c.id, task: out.task, model: out.result.model, bubbles: out.bubbles.length, latencyMs: Date.now() - started, filtered: out.safety.filtered, mode: mode.kind },
+      { conversationId, companionId: c.id, task: out.task, model: out.result.model, provider: out.result.provider, bubbles: out.bubbles.length, latencyMs: Date.now() - started, filtered: out.safety.filtered, mode: mode.kind, calibration: calibration.adjustments, unusual: calibration.unusual },
       "réponse générée",
     );
+
+    // Mémoire : extraction sur le tour qui vient de se terminer (messages utilisateur depuis la dernière réponse + cette réponse).
+    if (mode.kind === "reply") {
+      let start = history.length;
+      while (start > 0 && history[start - 1]!.sender !== "companion") start--;
+      const turns = [...history.slice(start).map((h) => ({ sender: h.sender as "user" | "companion", content: h.content, id: h.id })), ...created.map((m) => ({ sender: "companion" as const, content: m.content, id: m.id }))];
+      this.track(
+        "memory.ingest",
+        this.memory.ingest({ user, companionId: c.id, companionName: c.name, userNickname: c.userNickname, turns }).then((r) => {
+          if (r.added.length || r.updated.length || r.events.length || r.forgotten.length) {
+            this.log.info({ companionId: c.id, added: r.added.length, updated: r.updated.length, events: r.events.length, forgotten: r.forgotten.length, droppedSensitive: r.droppedSensitive }, "mémoire mise à jour");
+          }
+        }),
+      );
+    }
   }
 }
 

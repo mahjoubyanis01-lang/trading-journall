@@ -250,6 +250,21 @@ interface ImageProvider  { generate(prompt, identityRef): Promise<Media> }
 interface PushProvider   { send(userId, notification) }
 ```
 
+### 5.1 bis Fournisseurs : local d'abord, Hermes Agent, Anthropic en option
+
+Le produit est **texte uniquement** côté LLM et tourne **en local par défaut** :
+
+| Fournisseur | Endpoint | Rôle recommandé |
+|---|---|---|
+| `local` — Ollama, llama.cpp server, vLLM, LM Studio (API OpenAI-compatible `/v1/chat/completions`) | `LOCAL_LLM_BASE_URL` | `chat` et `fast`. Modèles : Hermes 3 8B (chat, persona et suivi d'instructions solides), Hermes 3 3B (fast : humeur, extraction mémoire). Hermes 4 14B/70B (GGUF) ou Hermes 3 70B pour `deep` avec GPU. |
+| `hermes` — **Hermes Agent** (Nous Research), via son API server OpenAI-compatible (`hermes gateway`, `API_SERVER_ENABLED=true`, modèle `hermes-agent`) | `HERMES_AGENT_BASE_URL` | `chat` quand on veut l'agent complet : outils, skills, mémoire MEMORY.md/USER.md, sessions. Il tourne lui-même sur le modèle local ou distant configuré dans Hermes. |
+| `anthropic` | clé serveur | `deep` en option (conversations importantes), jamais requis. |
+| `fake` | — | tests. |
+
+Chaque tâche est routée vers un **slot** (`chat`, `fast`, `deep`) et chaque slot vers un fournisseur (`AI_CHAT_PROVIDER`, `AI_FAST_PROVIDER`, `AI_DEEP_PROVIDER`). Le fournisseur OpenAI-compatible fait : streaming SSE (commentaires keepalive et événements nommés de Hermes ignorés), filtrage des blocs `<think>`, sorties structurées via `response_format: json_schema` avec repli `json_object` puis une réparation guidée par l'erreur Zod, warmup au démarrage (`AI_WARMUP=true`) pour garder les poids chargés, coût 0 dans le CostMeter.
+
+Vitesse : la réponse ne dépend que d'un appel de chat (streaming) ; la classification d'humeur tourne en parallèle sur le modèle rapide et l'extraction mémoire après l'envoi de la réponse. Sur CPU 4 cœurs avec un modèle 0,5B : streaming ≈ 0,7 s, JSON structuré ≈ 1 s (mesuré) ; un GPU grand public avec Hermes 3 8B vise < 1,5 s au premier token.
+
 ### 5.2 Model Router
 
 | Tâche | Modèle | Effort | Notes |
@@ -321,7 +336,16 @@ Même room LiveKit ; le flux TTS alimente un `VideoProvider` (avatar temps réel
 
 ---
 
-## 7. Architecture mémoire
+## 7. Architecture mémoire — le cerveau (`cerveau.md`)
+
+Le compagnon a un **cerveau lisible**, à la manière de la mémoire curée et bornée de Hermes Agent (MEMORY.md / USER.md), mais **par compagnon, isolé par utilisateur et contrôlable dans l'app** :
+
+- Source de vérité : tables `memories` (type, `key` unique pour identité/goûts, importance, confiance, source, sensible, épinglé, dates, compteur de rappels, soft delete) et `events` (date, importance, état de relance).
+- Rendu `cerveau.md` : tableaux « À venir », « Identité », « Goûts et habitudes », « Nous », « Nos moments », « Ce qu'il sait », « Ce qu'on s'est raconté ». Deux versions : compacte pour le prompt (budget 3 200 caractères, rappel ciblé + événements à 10 jours, injectée dans la partie **stable** du system prompt pour le cache), complète pour l'écran Cerveau (édition, épinglage, oubli, « oublie ce qui ressemble à… »).
+- Écriture : après chaque tour, `memory.extract` (modèle rapide, JSON structuré) propose `add / update / forget` + événements ; clés uniques mises à jour plutôt que dupliquées, doublons lexicaux ignorés, données sensibles (santé, religion, orientation, finances, politique) rejetées sauf accord explicite dans les préférences, garde-fou anti-hallucination (une identité/préférence doit s'appuyer sur les mots de la personne), dates relatives FR résolues (« vendredi », « demain », « dans 3 jours », « 15/10 »).
+- Lecture : rappel lexical (identité et épinglés toujours, puis pertinence × importance × récence) — aucune dépendance externe ; pgvector + embeddings locaux s'ajoutent derrière la même fonction quand le volume le justifie.
+
+Détail du pipeline :
 
 1. **Écriture** : après chaque échange, job `memory.extract` (Haiku, structured output) propose des candidats `{type, content, importance, occurred_at?, expires_at?, event?}`. Règles : pas de doublon (similarité > 0.92 → fusion), importance < 0.2 → ignoré, données sensibles (santé, religion, orientation, finances…) → `sensitive=true` et stockées **seulement si l'utilisateur l'a dit explicitement**, jamais inférées.
 2. **Lecture** : `Context.build` combine (a) mémoires `pinned` + `identity`, (b) événements dans ±7 jours, (c) rappel vectoriel top-k sur le message courant, (d) mémoires `shared` récentes. Budget de tokens fixe.
@@ -329,6 +353,13 @@ Même room LiveKit ; le flux TTS alimente un `VideoProvider` (avatar temps réel
 4. **Contrôle utilisateur** : liste, modification, suppression (soft puis purge), export JSON, « oublie ça » en conversation → suppression immédiate.
 
 ---
+
+### 7 bis. Détection d'humeur et auto-calibration
+
+- Chaque message utilisateur produit une **lecture d'humeur probabiliste** : heuristique immédiate (lexique FR, ponctuation, emojis) puis classification par le modèle rapide (`emotion.classify`, en parallèle de la réponse, jamais bloquante), fusionnées 70/30. Stockée dans `mood_readings` avec ses indices, jamais le message entier.
+- `calibrations` garde, par compagnon : `current` (EMA rapide : une lecture avec signal déplace vite l'état, une lecture neutre le laisse retomber lentement), `baseline` (EMA lente : ce qui est normal pour cette personne) et `userStyle` (longueur moyenne, emojis, minuscules, questions).
+- `calibrate()` transforme l'écart `current − baseline` en consignes de **ton et de format** injectées dans la partie volatile du prompt (« elle semble fatiguée : court et calme », « pas de vannes », « suis son énergie »), détecte un **changement inhabituel** (distance ≥ 0,6 après ≥ 5 lectures) que le compagnon peut remarquer avec délicatesse, et **imite le style** de la personne (très court, sans emoji, minuscules). La personnalité (traits) n'est pas modifiée : seule la calibration du moment l'est.
+- Transparence : l'écran Cerveau montre la lecture courante, son incertitude et les consignes actives, avec la mention qu'il ne s'agit jamais d'un diagnostic.
 
 ## 8. Architecture relationnelle
 

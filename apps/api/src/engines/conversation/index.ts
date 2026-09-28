@@ -21,6 +21,9 @@ export interface GenerateInput {
   history: HistoryItem[];
   mode: { kind: "reply" } | { kind: "initiative"; reason: string };
   memories?: string[];
+  /** cerveau.md compact (rappel ciblé + événements proches), injecté dans la partie stable. */
+  brain?: string;
+  calibrationLines?: string[];
   now?: Date;
   degrade?: boolean;
 }
@@ -66,7 +69,8 @@ export class ConversationEngine {
 
   async generate(input: GenerateInput): Promise<GenerateOutput> {
     const personality: Personality = { traits: input.personality.traits, style: input.personality.style, preset: input.personality.preset };
-    const system = buildPersonalityPrompt({
+    const nick = input.companion.userNickname ?? input.user.displayName ?? "la personne";
+    let system = buildPersonalityPrompt({
       companionName: input.companion.name,
       bio: input.companion.bio,
       userNickname: input.companion.userNickname,
@@ -74,6 +78,9 @@ export class ConversationEngine {
       personality,
       stage: input.relationship.stage,
     });
+    if (input.brain && input.brain.trim()) {
+      system += `\n\n## Ta mémoire de ${nick} (ce que tu sais, utilise-le naturellement, ne le récite pas)\n${input.brain.trim()}`;
+    }
 
     const lastUser = [...input.history].reverse().find((h) => h.sender === "user");
     const emotion = input.mode.kind === "reply" && lastUser ? estimateEmotion(lastUser.content) : null;
@@ -85,12 +92,14 @@ export class ConversationEngine {
       mode: input.mode,
       companionName: input.companion.name,
       memories: input.memories,
+      calibrationLines: input.calibrationLines,
     });
 
     const task = pickChatTask({
       relationshipStage: input.relationship.stage,
       emotionalIntensity: emotion?.intensity ?? 0,
       userMessageLength: lastUser?.content.length ?? 0,
+      hasUpcomingEvent: /### À venir/.test(input.brain ?? ""),
       degrade: input.degrade,
     });
 

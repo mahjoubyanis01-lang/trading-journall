@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import type { Companion } from "@task/shared";
 import { api } from "../../lib/api";
 import { Avatar } from "../../components/Avatar";
@@ -60,6 +60,15 @@ export function CompanionProfile() {
             <h2 style={{ margin: "8px 0 0" }}>{c.name}</h2>
             {c.userNickname && <div className="muted">t'appelle « {c.userNickname} »</div>}
           </div>
+
+          <Link to={`/c/${c.id}/brain`} className="card" style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>
+            <span style={{ fontSize: 26 }}>🧠</span>
+            <div style={{ flex: 1 }}>
+              <b>Ce que {c.name} sait de toi</b>
+              <div className="muted" style={{ fontSize: 13 }}>Souvenirs, événements, lecture d'humeur. Tout est modifiable.</div>
+            </div>
+            <span className="muted">›</span>
+          </Link>
 
           <div className="section">Identité</div>
           <div className="card">

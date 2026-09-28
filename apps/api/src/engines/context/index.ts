@@ -14,6 +14,8 @@ export interface ContextInput {
   mode: { kind: "reply" } | { kind: "initiative"; reason: string };
   companionName: string;
   memories?: string[];
+  /** Consignes de calibration du moment (Emotion/Calibration Engine). */
+  calibrationLines?: string[];
 }
 
 export function localTimeParts(now: Date, timeZone: string) {
@@ -62,12 +64,16 @@ export function buildVolatileContext(input: ContextInput): string {
 
   const emo = input.emotion ? describeEmotion(input.emotion) : null;
   if (emo) lines.push("", `## Ressenti\n- ${emo}`);
+  if (input.calibrationLines?.length) {
+    lines.push("", "## Calibration du moment (adapte ton ton, pas ta personnalité)");
+    for (const l of input.calibrationLines) lines.push(`- ${l}`);
+  }
 
   lines.push("", "## Ce que tu fais maintenant");
   if (input.mode.kind === "reply") {
     lines.push("- Tu réponds au dernier message, comme dans une vraie discussion. Réagis à ce qui vient d'être dit, pas à tout l'historique.");
   } else {
-    lines.push(`- Tu écris en premier, de toi-même. Raison interne : ${input.mode.reason}. Ne mentionne pas cette raison, sois naturel·le et court·e.`);
+    lines.push(`- Tu écris en premier, de toi-même. Raison interne : ${input.mode.reason}. Ne mentionne pas cette raison, sois naturel·le et court·e : un ou deux messages très courts, comme un premier texto.`);
   }
   lines.push("- Ne signe pas, n'ajoute pas ton nom, pas de guillemets autour de tes messages.");
   return lines.join("\n");

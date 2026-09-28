@@ -26,6 +26,13 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   return data as T;
 }
 
+export interface BrainResponse {
+  markdown: string;
+  memories: { id: string; type: string; key: string | null; content: string; importance: number; confidence: number; source: string; sensitive: boolean; pinned: boolean; occurredAt: string | null; createdAt: string; updatedAt: string }[];
+  events: { id: string; type: string; title: string; startsAt: string; importance: number; followUp: string }[];
+  calibration: { baseline: Record<string, number>; current: Record<string, number>; userStyle: Record<string, number>; readings: number; adjustments: Record<string, string | boolean>; unusual: boolean; lines: string[] };
+}
+
 export const api = {
   auth: {
     me: () => request<{ user: UserPublic }>("GET", "/auth/me"),
@@ -49,6 +56,13 @@ export const api = {
     create: (input: Record<string, unknown>) => request<{ companion: Companion }>("POST", "/companions", input),
     update: (id: string, input: Record<string, unknown>) => request<{ companion: Companion }>("PATCH", `/companions/${id}`, input),
     delete: (id: string) => request<{ ok: true }>("DELETE", `/companions/${id}`),
+  },
+  brain: {
+    get: (companionId: string) => request<BrainResponse>("GET", `/companions/${companionId}/brain`),
+    updateMemory: (id: string, patch: { content?: string; pinned?: boolean; importance?: number }) => request<{ memory: unknown }>("PATCH", `/memories/${id}`, patch),
+    deleteMemory: (id: string) => request<{ ok: true }>("DELETE", `/memories/${id}`),
+    deleteEvent: (id: string) => request<{ ok: true }>("DELETE", `/events/${id}`),
+    forget: (companionId: string, text: string) => request<{ forgotten: { id: string; content: string }[] }>("POST", `/companions/${companionId}/brain/forget`, { text }),
   },
   conversations: {
     list: () => request<{ conversations: Conversation[] }>("GET", "/conversations"),
