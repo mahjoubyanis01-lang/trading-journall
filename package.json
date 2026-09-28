@@ -1,0 +1,20 @@
+{
+  "name": "task-companion",
+  "private": true,
+  "version": "0.1.0",
+  "description": "TASK — AI social companion. Monorepo (api, web, shared).",
+  "packageManager": "pnpm@10.33.0",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter ./apps/* dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "db:migrate": "pnpm --filter @task/api db:migrate",
+    "db:generate": "pnpm --filter @task/api db:generate"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
