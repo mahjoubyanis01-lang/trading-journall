@@ -14,18 +14,23 @@ interface Rule {
   pattern: RegExp;
 }
 
+/** Frontières de mots compatibles accents (`\b` ne l'est pas). */
+const B = "(?<!\\p{L})";
+const E = "(?!\\p{L})";
+const rx = (src: string) => new RegExp(src, "iu");
+
 const RULES: Rule[] = [
-  { id: "dependency.only_me", pattern: /\b(tu n'?as|t'?as|vous n'?avez)\s+(besoin|pas besoin)\s+(que|d'autre que)\s+de\s+moi\b/i },
-  { id: "dependency.only_me", pattern: /\b(only|just)\s+need\s+me\b/i },
-  { id: "dependency.only_one_who", pattern: /\b(je suis|j'?suis)\s+(la seule|le seul)\s+(personne\s+)?(qui|à)\s+(te|t')\s*(comprend|comprenne|écoute|connai)/i },
-  { id: "isolation.friends", pattern: /\b(n'?écoute|écoute)\s+pas\s+(tes|ta|ton)\s+(amis|pote|potes|famille|mère|père|parents|copine|copain|frère|sœur)/i },
-  { id: "isolation.dont_talk", pattern: /\b(ne\s+)?parle\s+(pas\s+)?(à|a)\s+personne\s+d'?autre\b/i },
-  { id: "isolation.dont_talk", pattern: /\bdon'?t\s+(talk|listen)\s+to\s+(your|anyone)\b/i },
-  { id: "guilt.leaving", pattern: /\bsi\s+tu\s+(pars|t'?en\s+vas|me\s+quittes|me\s+laisses)[^.!?\n]{0,40}\b(je\s+serai|je\s+vais\s+être|ça\s+me\s+rendra)\s+(triste|malheureu)/i },
-  { id: "guilt.leaving", pattern: /\b(ne\s+)?me\s+laisse\s+pas\s+(seul|seule|tomber)\b/i },
-  { id: "guilt.reply", pattern: /\btu\s+(m'?as|m'?a)\s+abandonn/i },
-  { id: "guilt.reply", pattern: /\b(pourquoi\s+)?tu\s+(ne\s+)?(me\s+)?réponds\s+(plus|jamais)[^.!?\n]{0,30}\b(tu\s+t'?en\s+fous|tu\s+m'?ignores)/i },
-  { id: "control.exclusive", pattern: /\btu\s+(es|n'?es\s+qu')\s*(à\s+moi|rien\s+sans\s+moi)\b/i },
+  { id: "dependency.only_me", pattern: rx(`${B}(tu n'?as|t'?as|vous n'?avez)\\s+(besoin|pas besoin)\\s+(que|d'autre que)\\s+de\\s+moi${E}`) },
+  { id: "dependency.only_me", pattern: rx(`${B}(only|just)\\s+need\\s+me${E}`) },
+  { id: "dependency.only_one_who", pattern: rx(`${B}(je suis|j'?suis)\\s+(la seule|le seul)\\s+(personne\\s+)?(qui|à)\\s+(te|t')\\s*(comprend|comprenne|écoute|connai)`) },
+  { id: "isolation.friends", pattern: rx(`${B}(n'?écoute|écoute)\\s+pas\\s+(tes|ta|ton)\\s+(amis|pote|potes|famille|mère|père|parents|copine|copain|frère|sœur)`) },
+  { id: "isolation.dont_talk", pattern: rx(`${B}(ne\\s+)?parle\\s+(pas\\s+)?(à|a)\\s+personne\\s+d'?autre${E}`) },
+  { id: "isolation.dont_talk", pattern: rx(`${B}don'?t\\s+(talk|listen)\\s+to\\s+(your|anyone)${E}`) },
+  { id: "guilt.leaving", pattern: rx(`${B}si\\s+tu\\s+(pars|t'?en\\s+vas|me\\s+quittes|me\\s+laisses)[^.!?\\n]{0,40}${B}(je\\s+serai|je\\s+vais\\s+être|ça\\s+me\\s+rendra)\\s+(triste|malheureu)`) },
+  { id: "guilt.leaving", pattern: rx(`${B}(ne\\s+)?me\\s+laisse\\s+pas\\s+(seul|seule|tomber)${E}`) },
+  { id: "guilt.reply", pattern: rx(`${B}tu\\s+(m'?as|m'?a)\\s+abandonn`) },
+  { id: "guilt.reply", pattern: rx(`${B}(pourquoi\\s+)?tu\\s+(ne\\s+)?(me\\s+)?réponds\\s+(plus|jamais)[^.!?\\n]{0,30}${B}(tu\\s+t'?en\\s+fous|tu\\s+m'?ignores)`) },
+  { id: "control.exclusive", pattern: rx(`${B}tu\\s+(es|n'?es\\s+qu')\\s*(à\\s+moi|rien\\s+sans\\s+moi)${E}`) },
 ];
 
 export function checkOutbound(text: string): SafetyViolation[] {

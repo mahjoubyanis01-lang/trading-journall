@@ -15,11 +15,16 @@ import { UserService } from "./modules/users/service.js";
 import { userRoutes } from "./modules/users/routes.js";
 import { CompanionService } from "./modules/companions/service.js";
 import { companionRoutes } from "./modules/companions/routes.js";
+import { ConversationService } from "./modules/conversations/service.js";
+import { conversationRoutes } from "./modules/conversations/routes.js";
+import { ConversationBus } from "./modules/conversations/bus.js";
+import { ConversationEngine } from "./engines/conversation/index.js";
 
 export interface Services {
   auth: AuthService;
   users: UserService;
   companions: CompanionService;
+  conversations: ConversationService;
   costs: CostMeter;
 }
 
@@ -43,16 +48,23 @@ export async function buildApp({ config, db, ai }: BuildAppOptions): Promise<Fas
     loggerInstance: createLogger(config.NODE_ENV === "test" ? "silent" : config.LOG_LEVEL, config.NODE_ENV === "development") as unknown as FastifyBaseLogger,
     trustProxy: true,
     bodyLimit: 1024 * 1024,
+    forceCloseConnections: true, // ferme les flux SSE ouverts à l'arrêt
   });
 
   app.decorate("config", config);
   app.decorate("db", db);
   app.decorate("ai", ai);
+  const companions = new CompanionService(db);
+  const costs = new CostMeter(db);
   app.decorate("services", {
     auth: new AuthService(db, config.SESSION_TTL_DAYS),
     users: new UserService(db),
-    companions: new CompanionService(db),
-    costs: new CostMeter(db),
+    companions,
+    conversations: new ConversationService(db, new ConversationEngine(ai), companions, costs, new ConversationBus(), app.log as unknown as import("./observability/logger.js").Logger, {
+      pacing: config.NODE_ENV === "test" ? 0 : 1,
+      settleMs: config.NODE_ENV === "test" ? 100 : 700,
+    }),
+    costs,
   } satisfies Services);
 
   await app.register(cors, { origin: config.WEB_ORIGIN, credentials: true });
@@ -78,6 +90,7 @@ export async function buildApp({ config, db, ai }: BuildAppOptions): Promise<Fas
       await api.register(authRoutes);
       await api.register(userRoutes);
       await api.register(companionRoutes);
+      await api.register(conversationRoutes);
     },
     { prefix: "/api" },
   );

@@ -290,11 +290,12 @@ message utilisateur
 
 ## 6. Architecture realtime
 
-### 6.1 Texte (MVP)
+### 6.1 Texte (implémenté en phase 2)
 
-- `POST /conversations/:id/messages` persiste le message et répond `202`.
-- `GET /conversations/:id/stream` (SSE) : la réponse du compagnon arrive en deltas, puis événement `message.complete`, puis éventuellement `message.new` (bulles suivantes).
-- WebSocket `/ws` : événements poussés (`initiative.message`, `story.new`, `call.incoming`, `typing`).
+- `POST /conversations/:id/messages` persiste le message utilisateur et répond `201` immédiatement ; la réponse est générée en arrière-plan, sérialisée par conversation (une rafale de messages reçoit une seule réponse, après un court délai de « settle »).
+- `GET /conversations/:id/stream` (SSE) : `typing`, puis une bulle `message` à la fois, avec une temporalité proportionnelle à la longueur (bornée). Pas de streaming token par token pour le chat : une personne n'écrit pas en streaming, et cela permet d'appliquer le filtre relationnel avant l'affichage. Le type `delta` reste dans le protocole pour les transcriptions d'appel.
+- Bus d'événements en mémoire (`ConversationBus`) ; à remplacer par Redis pub/sub derrière la même interface pour plusieurs instances.
+- WebSocket `/ws` (phase 5) : événements poussés hors conversation (`initiative.message`, `story.new`, `call.incoming`).
 
 ### 6.2 Vocaux (Phase 7)
 

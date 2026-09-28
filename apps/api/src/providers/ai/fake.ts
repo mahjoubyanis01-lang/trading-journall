@@ -15,6 +15,14 @@ export class FakeAIProvider implements AIProvider {
   private queue: Scripted[] = [];
   private structuredQueue: unknown[] = [];
 
+  /** Vide les files et l'historique des requêtes (à appeler entre deux tests). */
+  reset() {
+    this.queue.length = 0;
+    this.structuredQueue.length = 0;
+    this.requests.length = 0;
+    return this;
+  }
+
   enqueue(...responses: Scripted[]) {
     this.queue.push(...responses);
     return this;

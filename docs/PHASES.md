@@ -6,7 +6,7 @@ Légende : ✅ fait et testé · 🟡 en cours · ⬜ à faire · 🔌 nécessit
 |---|---|---|---|
 | 0 | Audit du repo, architecture (`docs/ARCHITECTURE.md`), monorepo pnpm, Postgres+pgvector, migrations Drizzle, CI de tests | ✅ | |
 | 1 | Auth (email + mot de passe scrypt, sessions opaques révocables, cookie httpOnly), profil + préférences, création/édition/suppression du compagnon (nom, surnom, voix, avatar, personnalité, permissions), relation initiale, conversation directe, onboarding web | ✅ | Suppression de compte en cascade ; isolation par utilisateur testée |
-| 2 | Chat texte : Conversation Engine, Context Engine (partie volatile), streaming SSE, multi-bulles, Safety outbound, suivi des coûts | 🟡 | 🔌 `ANTHROPIC_API_KEY` côté serveur pour une vraie conversation ; sans clé, provider factice |
+| 2 | Chat texte : Conversation Engine, Context Engine (heure locale, rythme de la relation, signaux émotionnels prudents), premier contact à l'initiative du compagnon, réponses multi-bulles avec temporalité, coalescence des rafales, filtre relationnel (Safety), SSE temps réel, non-lus, suivi des coûts, écran de chat web | ✅ code + tests + e2e navigateur | 🔌 `ANTHROPIC_API_KEY` côté serveur pour une vraie conversation ; non exercé contre l'API réelle dans cet environnement (provider factice) |
 | 3 | Memory Engine : extraction structurée, pgvector, rappel, événements futurs, contrôle utilisateur | ⬜ | 🔌 embeddings |
 | 4 | Relationship Engine : mise à jour des dimensions, stage, relationship_events | ⬜ | |
 | 5 | Initiative + Habit + Notification Engine : workers BullMQ, journal des décisions, Web Push | ⬜ | 🔌 Redis, VAPID |
@@ -17,6 +17,13 @@ Légende : ✅ fait et testé · 🟡 en cours · ⬜ à faire · 🔌 nécessit
 | 10 | Multimédia + mode Together | ⬜ | |
 | 11 | Multi-compagnons UI + groupes | ⬜ | Le modèle de données est déjà multi-compagnon |
 | 12 | Prod : quotas, chiffrement, export, observabilité, shell natif | ⬜ | |
+
+## Vérifications faites
+
+- `pnpm test` : 35 tests API (auth, compagnons, isolation entre utilisateurs, personnalité, sécurité relationnelle, routeur, moteur de conversation, émotion, conversations + SSE) et 2 tests `shared`.
+- `pnpm typecheck` : `shared`, `api`, `web`.
+- `pnpm --filter @task/web build` : bundle PWA.
+- Scénario Playwright (Chromium mobile 390×844) : onboarding complet → premier contact → envoi → réponse → profil → accueil → rechargement avec session persistante, sans erreur JS.
 
 ## Ce qui est réel vs. ce qui ne l'est pas
 
